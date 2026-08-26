@@ -29,6 +29,20 @@ if [[ ! -f "$MAC_FILE" ]]; then
 fi
 CONTAINER_MAC=$(cat "$MAC_FILE")
 
+if [[ -d /mnt/wslg ]]; then
+    # WSL2: WSLg exposes X11/Wayland/PulseAudio sockets under one runtime dir.
+    AUDIO_RUNTIME_DIR="/mnt/wslg/runtime-dir"
+else
+    # Native Linux: sockets live under the desktop session's own XDG runtime dir.
+    AUDIO_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+fi
+
+if [[ ! -d "$AUDIO_RUNTIME_DIR" ]]; then
+    echo "!! Runtime dir $AUDIO_RUNTIME_DIR not found — audio passthrough will likely fail" >&2
+fi
+
+PULSE_SOCKET="unix:${AUDIO_RUNTIME_DIR}/pulse/native"
+
 docker run -it --rm \
     --cap-add=NET_ADMIN \
     --device=/dev/net/tun \
@@ -38,11 +52,11 @@ docker run -it --rm \
     -v "$HOME_DIR:/home/claude" \
     -v "$ADGUARD_CONFIG_DIR:/root/.local/share/adguardvpn-cli" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v /mnt/wslg/runtime-dir:/mnt/wslg/runtime-dir \
+    -v "$AUDIO_RUNTIME_DIR:$AUDIO_RUNTIME_DIR" \
     -e DISPLAY="$DISPLAY" \
     -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    -e XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
-    -e PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native \
+    -e XDG_RUNTIME_DIR="$AUDIO_RUNTIME_DIR" \
+    -e PULSE_SERVER="$PULSE_SOCKET" \
     -e VPN_LOCATION="$LOCATION" \
     --name claude-desktop-vpn \
     claude-desktop-vpn-container \

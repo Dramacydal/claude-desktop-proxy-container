@@ -1,17 +1,20 @@
-# Claude Desktop in a VPN-Isolated Docker Container
+# Claude Desktop in a VPN-Isolated Docker Container (WSL2 / Linux)
 
-Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside a Docker container with **all traffic forced through AdGuard VPN** and a **killswitch** — if the VPN drops, the container loses network access entirely instead of leaking traffic through your regular connection. GUI is forwarded to Windows via WSLg (X11/Wayland), including audio and microphone.
+**Built and tested for Windows + WSL2**, with best-effort support for native Linux desktops — `run.sh` auto-detects WSLg (`/mnt/wslg`) vs. a native `XDG_RUNTIME_DIR` and mounts the right GUI/audio sockets accordingly (see [How it works](#how-it-works)). It does **not** support macOS: there's no X11/Wayland or PulseAudio on the host to pass through, and it would need a fundamentally different approach (e.g. VNC).
+
+Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside a Docker container with **all traffic forced through AdGuard VPN** and a **killswitch** — if the VPN drops, the container loses network access entirely instead of leaking traffic through your regular connection. GUI, audio, and microphone are forwarded to Windows via WSLg (see [How it works](#how-it-works) for details).
 
 ## How it works
 
 - The container has its own isolated network namespace (unlike separate WSL2 distros, which share one).
 - `entrypoint.sh` sets a default-DROP `iptables` policy, brings up AdGuard VPN CLI (TUN mode), waits for the `tun0` interface, then allows traffic only through it (plus loopback and the VPN process itself).
 - If the VPN never connects, the container refuses to start the GUI app instead of running with a broken killswitch.
-- GUI is displayed via X11 (`/tmp/.X11-unix`, bind-mounted from the host — the app runs in X11-via-XWayland mode, see `--doctor` output). Audio and microphone go through PulseAudio, whose socket lives in `/mnt/wslg/runtime-dir/pulse/native`. Both are provided by WSLg, which Windows already exposes to WSL2.
+- GUI is displayed via X11 (`/tmp/.X11-unix`, bind-mounted from the host — the app runs in X11-via-XWayland mode, see `--doctor` output). Audio and microphone go through PulseAudio, whose socket `run.sh` locates automatically: `/mnt/wslg/runtime-dir/pulse/native` on WSL2 (provided by WSLg), or `$XDG_RUNTIME_DIR/pulse/native` on native Linux (provided by the desktop session).
 - Your home directory and VPN login are stored outside the container (both bind-mounted from the host), so they survive container restarts. The container itself is ephemeral — it only exists while the main process (Claude Desktop) is running.
 
 ## Prerequisites
 
+**On WSL2:**
 - **Windows 11** with WSL2 and a Linux distro (tested on Debian).
 - **`.wslconfig` must use NAT networking**, not mirrored:
 ```ini
@@ -19,7 +22,14 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
   networkingMode=NAT
 ```
   (Mirrored mode breaks Docker's bridge networking on some setups — see Troubleshooting.)
-- **Docker Engine** installed inside the WSL2 distro (not Docker Desktop):
+
+**On native Linux:**
+- An X11 (or XWayland) session — `$DISPLAY` and `/tmp/.X11-unix` must be present.
+- A running PulseAudio user session (`$XDG_RUNTIME_DIR/pulse/native` must exist) if you want audio/mic.
+- Not tested as extensively as WSL2 — see [How it works](#how-it-works) for what `run.sh` auto-detects.
+
+**Both:**
+- **Docker Engine** (not Docker Desktop). On WSL2, install it inside the distro:
 ```bash
   sudo apt-get update
   sudo apt-get install -y ca-certificates curl gnupg
@@ -41,7 +51,6 @@ Node.js is installed in the image alongside the packages above because `claude-d
 ├── entrypoint.sh # killswitch + VPN bring-up + GUI launch, runs as container PID 1
 ├── run.sh # wrapper around docker run with the right flags
 └── README.md
-
 
 ## Setup
 
@@ -71,7 +80,6 @@ On first launch, `entrypoint.sh` will detect there's no saved login and print a 
 ```
 You need to authorize in your browser. The following link will be available for 1799 seconds: https://...
 ```
-
 
 Open that link in a Windows browser and log in with your AdGuard account. The VPN config (including the login token) is stored in `<home>/.adguard-vpn-config`, bind-mounted from your home directory; the container also uses a fixed hostname and a MAC address generated on first run (then reused via `.container-mac`) — **both are required** for AdGuard to recognize the session as the same device on subsequent runs. Don't delete `.container-mac` or `.adguard-vpn-config` in your home directory unless you want a fresh device identity.
 
@@ -112,10 +120,8 @@ Since `run.sh` accepts a trailing command, you can use the same VPN-protected en
 ### Inspecting a running container
 
 ```bash
-docker ps -a                          # see if it's running
-docker exec -it claude-desktop-vpn bash       # shell into a running container
-docker exec -it claude-desktop-vpn adguardvpn-cli status
-docker exec -it claude-desktop-vpn curl -m5 ip-api.com   # should show your VPN location, not your real one
+docker ps -a                            # see if it's running
+docker exec -it claude-desktop-vpn bash # shell into a running container
 ```
 
 ## Troubleshooting
@@ -136,9 +142,9 @@ The VPN's `tun0` MTU of 1500 can cause fragmentation on long-lived WebSocket con
 This is fixed. `entrypoint.sh` launches the GUI app inside `dbus-run-session` with a `gnome-keyring-daemon` unlocked/started beforehand, so `org.freedesktop.secrets` is reachable and Electron's `safeStorage` can encrypt tokens normally. If you still see this warning, check `claude-desktop-unofficial --doctor` — the `Keyring` line should read `PASS ... org.freedesktop.secrets reachable`. If it doesn't, `docker exec -it claude-desktop-vpn ps aux | grep gnome-keyring` to confirm the daemon actually started.
 
 **Microphone doesn't work / `pactl` says "Connection refused".**
-Make sure `PULSE_SERVER` is set to `unix:/mnt/wslg/runtime-dir/pulse/native` (not the nonexistent `/mnt/wslg/PulseServer`) and that only `/mnt/wslg/runtime-dir` is mounted — not all of `/mnt/wslg` (see next point).
+Check what `run.sh` detected: it prints a warning if the runtime dir it picked (`/mnt/wslg/runtime-dir` on WSL2, `$XDG_RUNTIME_DIR` on native Linux) doesn't exist on the host. Confirm the actual Pulse socket is there (`ls <runtime-dir>/pulse/native`) and, on WSL2, that you're not using the nonexistent `/mnt/wslg/PulseServer` path from older guides.
 
-**Don't mount all of `/mnt/wslg`.**
+**Don't mount all of `/mnt/wslg` (WSL2 only).**
 `/mnt/wslg/distro/` bind-mounts the *entire root filesystem* of the WSLg host distro, which — because Windows drives are mounted via `drvfs` — includes your Windows drives. `run.sh` only mounts `/mnt/wslg/runtime-dir`, which is all that's actually needed for Wayland/PulseAudio sockets.
 
 **AdGuard login keeps being requested again on every run.**
@@ -153,4 +159,4 @@ This is expected and not a leak in this setup. Docker manages `/etc/resolv.conf`
 ## Known limitations
 
 - No KVM/QEMU passthrough, so Claude Desktop's Cowork VM feature won't work inside the container (`--doctor` will report this).
-- UDP traffic is fully tunneled (this setup uses the CLI's TUN mode, not a TCP-only SOCKS proxy), but DNS resolution depends on what AdGuard's client configures — check `adguardvpn-cli config show` if you need to verify.
+- UDP traffic is fully tunneled (this setup uses the CLI's TUN mode, not a TCP-only SOCKS proxy).
