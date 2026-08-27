@@ -102,6 +102,16 @@ Closing the Claude Desktop window doesn't necessarily stop the container — lik
 docker rm -f claude-desktop-vpn
 ```
 
+### Mounting your Windows drives
+
+By default the container only sees `$HOME_DIR` — none of your actual Windows drives. If you need Claude Desktop to access files elsewhere on `C:`, `D:`, etc., pass `--mount-wsl-drives`:
+
+```bash
+~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG --mount-wsl-drives
+```
+
+This bind-mounts every `/mnt/<letter>` drive WSL2 exposes (e.g. `/mnt/c`, `/mnt/d`) into the container at the same path. It's a no-op with a warning if you're not on WSL2 (native Linux has no drive letters to mount). **This gives the container read/write access to your entire Windows filesystem** — only use it if you actually need it, and understand it works against the isolation this setup is otherwise built for.
+
 ### Running other commands in the container
 
 Since `run.sh` accepts a trailing command, you can use the same VPN-protected environment for other things:
@@ -130,7 +140,10 @@ docker exec -it claude-desktop-vpn bash # shell into a running container
 Rebuild with `--network=host`. If `apt-get` inside the Dockerfile hangs specifically (not fails), it's usually an IPv6 connectivity gap in WSL2 — the Dockerfile already forces IPv4 via `Acquire::ForceIPv4=true` and `curl -4`.
 
 **Docker containers have no network access at all (build or runtime), even though the WSL2 host does.**
-Check `.wslconfig` — if `networkingMode=mirrored`, switch to `NAT` (see Prerequisites) and `wsl --shutdown`, then restart Docker. Mirrored mode has been observed to break Docker's bridge/NAT forwarding on some Windows builds.
+Check `.wslconfig` — if `networkingMode=mirrored`, switch to `NAT` (see Prerequisites) and `wsl --shutdown`, then restart Docker. Mirrored mode has been observed to break Docker's bridge/NAT forwarding on some Windows builds. If NAT is already set, check `sudo iptables -t nat -L -n -v | grep -i docker` for a `MASQUERADE` rule — if it's missing, `sudo systemctl restart docker` regenerates it (this can happen if another WSL2 distro touches iptables after Docker starts, since all WSL2 distros share one network namespace).
+
+**`adguardvpn-cli` (or other outbound requests) intermittently hang for ~5s then succeed, or fail with "HTTP protocol error".**
+Some networks have broken/unreliable IPv6 — a request tries IPv6 first, stalls, then falls back to IPv4. Pass `--disable-ipv6` to `run.sh` to disable IPv6 inside the container (`--sysctl net.ipv6.conf.all.disable_ipv6=1`), e.g. `run.sh --home ... --location SG --disable-ipv6`. Confirm it's active with `docker exec -it claude-desktop-vpn sysctl net.ipv6.conf.all.disable_ipv6` (should read `1`).
 
 **Claude Desktop window is blank / doesn't render / can't be dragged.**
 This was Docker's default 64MB `/dev/shm`, too small for Chromium's multi-process rendering. Already fixed via `--shm-size=1g` in `run.sh` — if you removed that flag, add it back.
