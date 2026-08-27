@@ -46,11 +46,14 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
 Node.js is installed in the image alongside the packages above because `claude-desktop-unofficial` depends on it.
 
 ## Project files
+
+```
 ~/claude-desktop-vpn-container/
-├── Dockerfile # image definition
-├── entrypoint.sh # killswitch + VPN bring-up + GUI launch, runs as container PID 1
-├── run.sh # wrapper around docker run with the right flags
+├── Dockerfile     # image definition
+├── entrypoint.sh  # killswitch + VPN bring-up + GUI launch, runs as container PID 1
+├── run.sh         # wrapper around docker run with the right flags
 └── README.md
+```
 
 ## Setup
 
@@ -81,7 +84,11 @@ On first launch, `entrypoint.sh` will detect there's no saved login and print a 
 You need to authorize in your browser. The following link will be available for 1799 seconds: https://...
 ```
 
-Open that link in a Windows browser and log in with your AdGuard account. The VPN config (including the login token) is stored in `<home>/.adguard-vpn-config`, bind-mounted from your home directory; the container also uses a fixed hostname and a MAC address generated on first run (then reused via `.container-mac`) — **both are required** for AdGuard to recognize the session as the same device on subsequent runs. Don't delete `.container-mac` or `.adguard-vpn-config` in your home directory unless you want a fresh device identity.
+Open that link in a Windows browser and log in with your AdGuard account. The VPN config (including the login token) is stored in `<home>/.adguard-vpn-config`, bind-mounted from your home directory; the container also uses a fixed hostname and a MAC address generated on first run (then reused via `.container-mac`) — **both are required** for AdGuard to recognize the session as the same device on subsequent runs.
+
+Why this matters: the container runs with `--rm`, so a fresh one is created on every launch, and Docker randomizes both the hostname and MAC address per container by default. AdGuard identifies a device by that hostname+MAC pair — without pinning them, every run would look like a brand-new device, which would either re-prompt for login every time or eat into your AdGuard account's device-limit quota (each "device" it hasn't seen before counts toward the limit, even if you never log out the old ones). `run.sh` and `entrypoint.sh` fix both to the same values every run so the container always looks like the same one device to AdGuard.
+
+Don't delete `.container-mac` or `.adguard-vpn-config` in your home directory unless you want a fresh device identity.
 
 ## Normal usage
 
