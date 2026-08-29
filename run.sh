@@ -3,8 +3,9 @@ HOME_DIR=""
 LOCATION=""
 MOUNT_WSL_DRIVES=0
 DISABLE_IPV6=0
+EXTRA_MOUNTS=()
 
-while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 ]]; do
+while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --mount ]]; do
     case "$1" in
         --home)
             HOME_DIR="$2"
@@ -22,11 +23,15 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
             DISABLE_IPV6=1
             shift 1
             ;;
+        --mount)
+            EXTRA_MOUNTS+=("$2")
+            shift 2
+            ;;
     esac
 done
 
 if [[ -z "$HOME_DIR" || -z "$LOCATION" ]]; then
-    echo "Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [command]"
+    echo "Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--mount src-path:dst-path ...] [command]"
     exit 1
 fi
 
@@ -71,6 +76,20 @@ if [[ "$MOUNT_WSL_DRIVES" -eq 1 ]]; then
     fi
 fi
 
+EXTRA_MOUNT_ARGS=()
+for m in "${EXTRA_MOUNTS[@]}"; do
+    src="${m%%:*}"
+    dst="${m#*:}"
+    if [[ -z "$src" || -z "$dst" || "$src" == "$m" ]]; then
+        echo "!! --mount '$m' ignored: expected format src-path:dst-path" >&2
+        continue
+    fi
+    if [[ ! -e "$src" ]]; then
+        echo "!! --mount: source '$src' does not exist on the host" >&2
+    fi
+    EXTRA_MOUNT_ARGS+=(-v "$src:$dst")
+done
+
 IPV6_SYSCTLS=()
 if [[ "$DISABLE_IPV6" -eq 1 ]]; then
     IPV6_SYSCTLS=(
@@ -91,6 +110,7 @@ docker run -it --rm \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "$AUDIO_RUNTIME_DIR:$AUDIO_RUNTIME_DIR" \
     "${DRIVE_MOUNTS[@]}" \
+    "${EXTRA_MOUNT_ARGS[@]}" \
     -e DISPLAY="$DISPLAY" \
     -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
     -e XDG_RUNTIME_DIR="$AUDIO_RUNTIME_DIR" \

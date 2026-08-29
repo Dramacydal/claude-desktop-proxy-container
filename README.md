@@ -43,7 +43,7 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
 ```
 - An **AdGuard VPN account** (the CLI will prompt you to log in on first run).
 
-Node.js is installed in the image alongside the packages above because `claude-desktop-unofficial` depends on it.
+Node.js is installed in the image alongside the packages above because `claude-desktop-unofficial` depends on it. The .NET 10 SDK is also installed, in case you want to build .NET projects inside the same VPN-protected environment (e.g. via `--mount` — see [Mounting host folders](#mounting-your-windows-drives)) — change `dotnet-sdk-10.0` in the `Dockerfile` if you need a different version.
 
 ## Project files
 
@@ -118,6 +118,16 @@ By default the container only sees `$HOME_DIR` — none of your actual Windows d
 ```
 
 This bind-mounts every `/mnt/<letter>` drive WSL2 exposes (e.g. `/mnt/c`, `/mnt/d`) into the container at the same path. It's a no-op with a warning if you're not on WSL2 (native Linux has no drive letters to mount). **This gives the container read/write access to your entire Windows filesystem** — only use it if you actually need it, and understand it works against the isolation this setup is otherwise built for.
+
+If you only need specific folders rather than whole drives, use `--mount src-path:dst-path` instead — it can be repeated for multiple folders:
+
+```bash
+~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG \
+    --mount /mnt/e/git/some-project:/home/claude/some-project \
+    --mount /mnt/d/docs:/home/claude/docs
+```
+
+Note that `~` in the destination gets expanded by your *host* shell before `run.sh` ever sees it (e.g. `~/test` becomes `/home/<you>/test`, not a path inside the container) — write out the actual in-container path you want (typically under `/home/claude/...`) instead of relying on `~`.
 
 ### Running other commands in the container
 
