@@ -129,6 +129,20 @@ If you only need specific folders rather than whole drives, use `--mount src-pat
 
 Note that `~` in the destination gets expanded by your *host* shell before `run.sh` ever sees it (e.g. `~/test` becomes `/home/<you>/test`, not a path inside the container) — write out the actual in-container path you want (typically under `/home/claude/...`) instead of relying on `~`.
 
+### Forwarding ports
+
+By default nothing running inside the container is reachable from the host. If you're running something inside the container that needs to be reachable (a dev server, an API, etc.), use `--port [host-ip:]host-port:container-port` — it can be repeated, takes an optional `/tcp` or `/udp` suffix (default `/tcp`), and an optional host IP to bind to a specific interface instead of all of them:
+
+```bash
+~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG \
+    --port 3000:3000 \
+    --port 127.0.0.1:8080:80 \
+    --port 53:53/udp \
+    bash
+```
+
+This is a regular Docker port publish (`-p`) — the killswitch only restricts *outbound* traffic (`OUTPUT` chain), so published ports work normally regardless of VPN/killswitch state.
+
 ### Running other commands in the container
 
 Since `run.sh` accepts a trailing command, you can use the same VPN-protected environment for other things:
