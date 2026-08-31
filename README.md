@@ -66,6 +66,13 @@ Node.js is installed in the image alongside the packages above because `claude-d
 ```
    `--network=host` is required for the build itself — some WSL2/Docker setups fail to resolve DNS over the default bridge network during `docker build` (see Troubleshooting). It has no effect on the container at runtime.
 
+   By default this reuses Docker's build cache, including the `claude-desktop-unofficial` install step — a plain rebuild won't pick up a newer upstream release on its own. `entrypoint.sh` checks for a newer version on every container start and logs a warning if one's available; when you see that warning, force just that step (and everything after it) to re-run:
+```bash
+   docker build --network=host -t claude-desktop-vpn-container \
+       --build-arg PUID=$(id -u) --build-arg PGID=$(id -g) \
+       --build-arg CACHEBUST=$(date +%s) .
+```
+
 3. Pick a home directory for the container (anything you like, created automatically):
 ```bash
    mkdir -p ~/claude-container-home
@@ -98,10 +105,11 @@ Don't delete `.container-mac` or `.adguard-vpn-config` in your home directory un
 
 With no trailing command, this launches `claude-desktop-unofficial` (the GUI) directly. The container:
 1. Sets up the killswitch.
-2. Confirms you're logged in to AdGuard (skips the login prompt if already authenticated).
-3. Connects to the VPN and waits (up to 30s) for `tun0`.
-4. If the VPN fails to come up, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-vpn adguardvpn-cli status` and `docker exec -it claude-desktop-vpn tail -40 /root/.local/share/adguardvpn-cli/tunnel.log`.
-5. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
+2. Checks whether a newer `claude-desktop-unofficial` package is available upstream and logs a warning if so (informational only, never blocks startup — rebuild the image to pick up the update).
+3. Confirms you're logged in to AdGuard (skips the login prompt if already authenticated).
+4. Connects to the VPN and waits (up to 30s) for `tun0`.
+5. If the VPN fails to come up, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-vpn adguardvpn-cli status` and `docker exec -it claude-desktop-vpn tail -40 /root/.local/share/adguardvpn-cli/tunnel.log`.
+6. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
 
 Closing the Claude Desktop window doesn't necessarily stop the container — like on native Linux, the app may keep running in the background. To fully stop everything:
 

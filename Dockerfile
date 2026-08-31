@@ -60,7 +60,9 @@ RUN curl -4 -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/ma
 RUN sh /tmp/install-adguard.sh -v < /dev/null || true
 RUN ln -sf /opt/adguardvpn_cli/adguardvpn-cli /usr/local/bin/adguardvpn-cli
 
-RUN curl -4 -fsSL https://pkg.claude-desktop-debian.dev/KEY.gpg | gpg --dearmor -o /usr/share/keyrings/claude-desktop-unofficial.gpg && \
+ARG CACHEBUST=1
+RUN echo "cachebust=$CACHEBUST" && \
+    curl -4 -fsSL https://pkg.claude-desktop-debian.dev/KEY.gpg | gpg --dearmor -o /usr/share/keyrings/claude-desktop-unofficial.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/claude-desktop-unofficial.gpg arch=amd64,arm64] https://pkg.claude-desktop-debian.dev stable main" \
         > /etc/apt/sources.list.d/claude-desktop-unofficial.list && \
     apt-get update -o Acquire::ForceIPv4=true && apt-get install -y -o Acquire::ForceIPv4=true --no-install-recommends claude-desktop-unofficial && \

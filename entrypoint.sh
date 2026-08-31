@@ -8,6 +8,21 @@ iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -m owner --uid-owner 0 -j ACCEPT
 iptables -A OUTPUT -o tun0 -j ACCEPT
 
+echo "== Checking for claude-desktop-unofficial updates =="
+if apt-get update -qq -o Acquire::ForceIPv4=true \
+    -o Dir::Etc::SourceList=/etc/apt/sources.list.d/claude-desktop-unofficial.list \
+    -o Dir::Etc::SourceParts=/dev/null >/dev/null 2>&1; then
+    installed_version=$(dpkg-query -W -f='${Version}' claude-desktop-unofficial 2>/dev/null || true)
+    candidate_version=$(apt-cache policy claude-desktop-unofficial 2>/dev/null | awk '/Candidate:/ {print $2}')
+    if [[ -n "$candidate_version" && "$installed_version" != "$candidate_version" ]]; then
+        echo "!! claude-desktop-unofficial is outdated: installed $installed_version, latest $candidate_version — rebuild the image to update"
+    else
+        echo "== claude-desktop-unofficial is up to date ($installed_version) =="
+    fi
+else
+    echo "!! Could not check for claude-desktop-unofficial updates (no network yet) — skipping"
+fi
+
 echo "== Checking AdGuard login =="
 status_output=$(adguardvpn-cli status 2>&1) || true
 if printf '%s\n' "$status_output" | grep -qiE \
