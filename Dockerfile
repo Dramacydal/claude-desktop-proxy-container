@@ -20,6 +20,13 @@ RUN apt-get update -o Acquire::ForceIPv4=true && apt-get install -y -o Acquire::
     less \
     vim \
     nano \
+    xxd \
+    binutils \
+    file \
+    dnsutils \
+    iputils-ping \
+    rsync \
+    shellcheck \
     iptables \
     iproute2 \
     sudo \
