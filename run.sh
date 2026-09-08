@@ -1,19 +1,19 @@
 #!/bin/bash
 HOME_DIR=""
-LOCATION=""
+PROXY_PATH=""
 MOUNT_WSL_DRIVES=0
 DISABLE_IPV6=0
 EXTRA_MOUNTS=()
 EXTRA_PORTS=()
 
-while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --mount || "$1" == --port ]]; do
+while [[ "$1" == --home || "$1" == --proxy-path || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --mount || "$1" == --port ]]; do
     case "$1" in
         --home)
             HOME_DIR="$2"
             shift 2
             ;;
-        --location)
-            LOCATION="$2"
+        --proxy-path)
+            PROXY_PATH="$2"
             shift 2
             ;;
         --mount-wsl-drives)
@@ -35,23 +35,18 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
     esac
 done
 
-if [[ -z "$HOME_DIR" || -z "$LOCATION" ]]; then
-    echo "Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
+if [[ -z "$HOME_DIR" || -z "$PROXY_PATH" ]]; then
+    echo "Usage: $0 --home /path/to/home --proxy-path /path/to/proxy.conf [--mount-wsl-drives] [--disable-ipv6] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
+    echo "proxy.conf holds one line: socks5:// or http:// or https:// [user:pass@]host:port"
+    exit 1
+fi
+
+if [[ ! -f "$PROXY_PATH" ]]; then
+    echo "!! --proxy-path '$PROXY_PATH' does not exist" >&2
     exit 1
 fi
 
 mkdir -p "$HOME_DIR"
-
-ADGUARD_CONFIG_DIR="$HOME_DIR/.adguard-vpn-config"
-mkdir -p "$ADGUARD_CONFIG_DIR"
-
-MAC_FILE="$HOME_DIR/.container-mac"
-if [[ ! -f "$MAC_FILE" ]]; then
-    printf '02:%02x:%02x:%02x:%02x:%02x\n' \
-        $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) \
-        > "$MAC_FILE"
-fi
-CONTAINER_MAC=$(cat "$MAC_FILE")
 
 if [[ -d /mnt/wslg ]]; then
     # WSL2: WSLg exposes X11/Wayland/PulseAudio sockets under one runtime dir.
@@ -116,11 +111,9 @@ docker run -it --rm \
     --cap-add=NET_ADMIN \
     --device=/dev/net/tun \
     --shm-size=1g \
-    --mac-address="$CONTAINER_MAC" \
-    --hostname="claude-desktop-vpn-container" \
     "${IPV6_SYSCTLS[@]}" \
     -v "$HOME_DIR:/home/claude" \
-    -v "$ADGUARD_CONFIG_DIR:/root/.local/share/adguardvpn-cli" \
+    -v "$PROXY_PATH:/run/claude-proxy.conf:ro" \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "$AUDIO_RUNTIME_DIR:$AUDIO_RUNTIME_DIR" \
     "${DRIVE_MOUNTS[@]}" \
@@ -130,7 +123,7 @@ docker run -it --rm \
     -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
     -e XDG_RUNTIME_DIR="$AUDIO_RUNTIME_DIR" \
     -e PULSE_SERVER="$PULSE_SOCKET" \
-    -e VPN_LOCATION="$LOCATION" \
-    --name claude-desktop-vpn \
-    claude-desktop-vpn-container \
+    -e PROXY_FILE="/run/claude-proxy.conf" \
+    --name claude-desktop-proxy \
+    claude-desktop-proxy-container \
     "${@:-claude-desktop-unofficial}"

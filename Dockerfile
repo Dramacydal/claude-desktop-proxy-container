@@ -62,10 +62,17 @@ RUN curl -4 -fsSL https://packages.microsoft.com/config/debian/12/packages-micro
     apt-get install -y -o Acquire::ForceIPv4=true --no-install-recommends dotnet-sdk-10.0 && \
     rm -rf /var/lib/apt/lists/*
 
-ENV USER=root
-RUN curl -4 -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/master/scripts/release/install.sh -o /tmp/install-adguard.sh
-RUN sh /tmp/install-adguard.sh -v < /dev/null || true
-RUN ln -sf /opt/adguardvpn_cli/adguardvpn-cli /usr/local/bin/adguardvpn-cli
+# sing-box provides the tun-based transparent proxy that the killswitch (see
+# entrypoint.sh) routes all container traffic through.
+# Bump this when you want a newer release — check https://github.com/SagerNet/sing-box/releases
+# for the current version tag before building (this default may lag upstream).
+ARG SING_BOX_VERSION=1.11.9
+RUN set -eu; \
+    ARCH=$(dpkg --print-architecture); \
+    curl -4 -fsSL -o /tmp/sing-box.deb \
+        "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box_${SING_BOX_VERSION}_linux_${ARCH}.deb" && \
+    dpkg -i /tmp/sing-box.deb && \
+    rm /tmp/sing-box.deb
 
 ARG CACHEBUST=1
 RUN echo "cachebust=$CACHEBUST" && \
