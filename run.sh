@@ -158,6 +158,7 @@ docker run -it --rm \
     --device=/dev/net/tun \
     --shm-size=1g \
     --mac-address="$CONTAINER_MAC" \
+    --hostname="claude-desktop-proxy-container" \
     "${IPV6_SYSCTLS[@]}" \
     -v "$HOME_DIR:/home/claude" \
     -v "$PROXY_PATH:/run/claude-proxy.conf:ro" \
