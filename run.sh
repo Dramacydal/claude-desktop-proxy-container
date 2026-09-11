@@ -4,10 +4,11 @@ LOCATION=""
 MOUNT_WSL_DRIVES=0
 DISABLE_IPV6=0
 FORWARD_SSH_AGENT=1
+CHECK_CLAUDE_UPDATE=0
 EXTRA_MOUNTS=()
 EXTRA_PORTS=()
 
-while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --no-forward-ssh-agent || "$1" == --mount || "$1" == --port ]]; do
+while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --no-forward-ssh-agent || "$1" == --check-claude-update || "$1" == --mount || "$1" == --port ]]; do
     case "$1" in
         --home)
             HOME_DIR="$2"
@@ -29,6 +30,10 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
             FORWARD_SSH_AGENT=0
             shift 1
             ;;
+        --check-claude-update)
+            CHECK_CLAUDE_UPDATE=1
+            shift 1
+            ;;
         --mount)
             EXTRA_MOUNTS+=("$2")
             shift 2
@@ -40,7 +45,7 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
     esac
 done
 
-USAGE="Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--no-forward-ssh-agent] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
+USAGE="Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--no-forward-ssh-agent] [--check-claude-update] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
 
 if [[ "$1" == --* ]]; then
     echo "Unknown option: $1" >&2
@@ -137,6 +142,12 @@ if [[ "$DISABLE_IPV6" -eq 1 ]]; then
     )
 fi
 
+if [[ "$CHECK_CLAUDE_UPDATE" -eq 1 ]]; then
+    CONTAINER_CMD=(--check-claude-update)
+else
+    CONTAINER_CMD=("${@:-claude-desktop-unofficial}")
+fi
+
 docker run -it --rm \
     --cap-add=NET_ADMIN \
     --device=/dev/net/tun \
@@ -159,4 +170,4 @@ docker run -it --rm \
     -e VPN_LOCATION="$LOCATION" \
     --name claude-desktop-vpn \
     claude-desktop-vpn-container \
-    "${@:-claude-desktop-unofficial}"
+    "${CONTAINER_CMD[@]}"
