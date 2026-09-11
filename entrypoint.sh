@@ -146,11 +146,19 @@ export PULSE_SERVER="${PULSE_SERVER:-unix:/mnt/wslg/runtime-dir/pulse/native}"
 mkdir -p /home/claude/.local/share/keyrings
 chown -R claude:claude /home/claude/.local/share/keyrings
 
+LAUNCHER_CONFIG="/home/claude/.config/claude-desktop-debian/environment"
+if [ ! -f "$LAUNCHER_CONFIG" ]; then
+    echo "== Setting CLAUDE_PASSWORD_STORE=basic (plain storage, no keyring/D-Bus dependency) =="
+    mkdir -p "$(dirname "$LAUNCHER_CONFIG")"
+    echo "CLAUDE_PASSWORD_STORE=basic" > "$LAUNCHER_CONFIG"
+    chown -R claude:claude /home/claude/.config
+fi
+
 exec sudo -u claude -H \
-    env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" PULSE_SERVER="$PULSE_SERVER" \
+    env DISPLAY="$DISPLAY" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" PULSE_SERVER="$PULSE_SERVER" SSH_AUTH_SOCK="$SSH_AUTH_SOCK" \
     dbus-run-session -- bash -c '
-        eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets,pkcs11,ssh)"
-        eval "$(printf "\n" | gnome-keyring-daemon --start --components=secrets,pkcs11,ssh)"
-        export GNOME_KEYRING_CONTROL SSH_AUTH_SOCK
+        eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets,pkcs11)"
+        eval "$(printf "\n" | gnome-keyring-daemon --start --components=secrets,pkcs11)"
+        export GNOME_KEYRING_CONTROL
         exec "$@"
     ' bash "$@"
