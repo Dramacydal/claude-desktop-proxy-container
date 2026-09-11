@@ -165,7 +165,7 @@ On by default: `run.sh` forwards your host's `$SSH_AUTH_SOCK`, plus `~/.ssh/conf
 To turn it all off at once:
 
 ```bash
-~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG --no-forward-ssh-agent bash
+~/claude-desktop-proxy-container/run.sh --home ~/claude-container-home/ --proxy-path ~/claude-proxy.conf --no-forward-ssh-agent bash
 ```
 
 Note this is why `gnome-keyring-daemon` is started with `--components=secrets,pkcs11` (no `ssh`) in `entrypoint.sh`: gnome-keyring's own `ssh` component would otherwise claim `SSH_AUTH_SOCK` for its own (empty, keyless) agent and shadow the one forwarded from the host.
