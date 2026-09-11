@@ -11,6 +11,7 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
 - If the proxy tunnel never comes up, the container refuses to start the GUI app instead of running with a broken killswitch.
 - GUI is displayed via X11 (`/tmp/.X11-unix`, bind-mounted from the host — the app runs in X11-via-XWayland mode, see `--doctor` output). Audio and microphone go through PulseAudio, whose socket `run.sh` locates automatically: `/mnt/wslg/runtime-dir/pulse/native` on WSL2 (provided by WSLg), or `$XDG_RUNTIME_DIR/pulse/native` on native Linux (provided by the desktop session).
 - Your home directory is stored outside the container (bind-mounted from the host), so it survives container restarts. The container itself is ephemeral — it only exists while the main process (Claude Desktop) is running.
+- Docker assigns a random MAC address to a new container by default, so a `--rm` container looks like a brand-new network device on every run. `run.sh` generates a random MAC once and stores it in `<home>/.container-mac`, reusing it on every subsequent run — useful if your proxy or network enforces any MAC/device-based allowlisting or rate-limiting. Don't delete `.container-mac` unless you want a fresh device identity.
 
 ## Prerequisites
 
@@ -210,7 +211,7 @@ Rather than chase that down further, `entrypoint.sh` sidesteps it: on first run 
 
 To confirm which one is actually active, check the running process's own arguments rather than logs:
 ```bash
-docker exec -it claude-desktop-vpn pgrep -af claude-desktop-unofficial
+docker exec -it claude-desktop-proxy pgrep -af claude-desktop-unofficial
 ```
 Look for `--password-store=basic` on the main `claude-desktop` process line (not the `bash /usr/bin/claude-desktop-unofficial` wrapper line).
 

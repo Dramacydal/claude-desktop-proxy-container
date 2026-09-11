@@ -63,6 +63,14 @@ fi
 
 mkdir -p "$HOME_DIR"
 
+MAC_FILE="$HOME_DIR/.container-mac"
+if [[ ! -f "$MAC_FILE" ]]; then
+    printf '02:%02x:%02x:%02x:%02x:%02x\n' \
+        $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) \
+        > "$MAC_FILE"
+fi
+CONTAINER_MAC=$(cat "$MAC_FILE")
+
 if [[ -d /mnt/wslg ]]; then
     # WSL2: WSLg exposes X11/Wayland/PulseAudio sockets under one runtime dir.
     AUDIO_RUNTIME_DIR="/mnt/wslg/runtime-dir"
@@ -138,6 +146,7 @@ docker run -it --rm \
     --cap-add=NET_ADMIN \
     --device=/dev/net/tun \
     --shm-size=1g \
+    --mac-address="$CONTAINER_MAC" \
     "${IPV6_SYSCTLS[@]}" \
     -v "$HOME_DIR:/home/claude" \
     -v "$PROXY_PATH:/run/claude-proxy.conf:ro" \
