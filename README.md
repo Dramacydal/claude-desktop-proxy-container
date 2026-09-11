@@ -67,7 +67,11 @@ Node.js is installed in the image alongside the packages above because `claude-d
 ```
    `--network=host` is required for the build itself — some WSL2/Docker setups fail to resolve DNS over the default bridge network during `docker build` (see Troubleshooting). It has no effect on the container at runtime.
 
-   By default this reuses Docker's build cache, including the `claude-desktop-unofficial` install step — a plain rebuild won't pick up a newer upstream release on its own. `entrypoint.sh` checks for a newer version on every container start and logs a warning if one's available; when you see that warning, force just that step (and everything after it) to re-run:
+   By default this reuses Docker's build cache, including the `claude-desktop-unofficial` install step — a plain rebuild won't pick up a newer upstream release on its own. Check whether one's available with:
+```bash
+   ~/claude-desktop-proxy-container/run.sh --home ~/claude-container-home/ --proxy-path ~/claude-proxy.conf --check-claude-update
+```
+   This only checks the version and exits — it doesn't start the proxy or GUI. If it reports a newer version, force just the install step (and everything after it) to re-run:
 ```bash
    docker build --network=host -t claude-desktop-proxy-container \
        --build-arg PUID=$(id -u) --build-arg PGID=$(id -g) \
@@ -108,10 +112,11 @@ Here `proxy1` is active. Comment it out and uncomment `proxy2` to switch — no 
 
 With no trailing command, this launches `claude-desktop-unofficial` (the GUI) directly. The container:
 1. Sets up the killswitch.
-2. Checks whether a newer `claude-desktop-unofficial` package is available upstream and logs a warning if so (informational only, never blocks startup — rebuild the image to pick up the update).
-3. Generates a [sing-box](https://github.com/SagerNet/sing-box) config from the proxy file and brings up its TUN interface, waiting (up to 30s) for `tun0`.
-4. If the tunnel fails to come up, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-proxy tail -40 /var/log/sing-box.log`.
-5. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
+2. Generates a [sing-box](https://github.com/SagerNet/sing-box) config from the proxy file and brings up its TUN interface, waiting (up to 30s) for `tun0`.
+3. If the tunnel fails to come up, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-proxy tail -40 /var/log/sing-box.log`.
+4. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
+
+Pass `--check-claude-update` (with the same `--home`/`--proxy-path`) to only check for an updated `claude-desktop-unofficial` package and exit — see [Setup](#setup) above. This replaces the old automatic version check that used to run (and print a warning) on every normal startup.
 
 Closing the Claude Desktop window doesn't necessarily stop the container — like on native Linux, the app may keep running in the background. To fully stop everything:
 
