@@ -3,10 +3,11 @@ HOME_DIR=""
 LOCATION=""
 MOUNT_WSL_DRIVES=0
 DISABLE_IPV6=0
+FORWARD_SSH_AGENT=1
 EXTRA_MOUNTS=()
 EXTRA_PORTS=()
 
-while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --mount || "$1" == --port ]]; do
+while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --no-forward-ssh-agent || "$1" == --mount || "$1" == --port ]]; do
     case "$1" in
         --home)
             HOME_DIR="$2"
@@ -24,6 +25,10 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
             DISABLE_IPV6=1
             shift 1
             ;;
+        --no-forward-ssh-agent)
+            FORWARD_SSH_AGENT=0
+            shift 1
+            ;;
         --mount)
             EXTRA_MOUNTS+=("$2")
             shift 2
@@ -35,8 +40,16 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
     esac
 done
 
+USAGE="Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--no-forward-ssh-agent] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
+
+if [[ "$1" == --* ]]; then
+    echo "Unknown option: $1" >&2
+    echo "$USAGE" >&2
+    exit 1
+fi
+
 if [[ -z "$HOME_DIR" || -z "$LOCATION" ]]; then
-    echo "Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [command]"
+    echo "$USAGE"
     exit 1
 fi
 
@@ -104,6 +117,18 @@ for p in "${EXTRA_PORTS[@]}"; do
     EXTRA_PORT_ARGS+=(-p "$p")
 done
 
+SSH_AGENT_ARGS=()
+if [[ "$FORWARD_SSH_AGENT" -eq 1 ]]; then
+    if [[ -n "${SSH_AUTH_SOCK:-}" && -S "$SSH_AUTH_SOCK" ]]; then
+        SSH_AGENT_ARGS=(-v "$SSH_AUTH_SOCK:$SSH_AUTH_SOCK" -e SSH_AUTH_SOCK="$SSH_AUTH_SOCK")
+    else
+        echo "!! SSH agent forwarding: \$SSH_AUTH_SOCK not set or not a valid socket on the host — is ssh-agent running? (pass --no-forward-ssh-agent to silence this)" >&2
+    fi
+
+    [[ -f "$HOME/.ssh/config" ]] && SSH_AGENT_ARGS+=(-v "$HOME/.ssh/config:/home/claude/.ssh/config:ro")
+    [[ -f "$HOME/.ssh/known_hosts" ]] && SSH_AGENT_ARGS+=(-v "$HOME/.ssh/known_hosts:/home/claude/.ssh/known_hosts")
+fi
+
 IPV6_SYSCTLS=()
 if [[ "$DISABLE_IPV6" -eq 1 ]]; then
     IPV6_SYSCTLS=(
@@ -126,6 +151,7 @@ docker run -it --rm \
     "${DRIVE_MOUNTS[@]}" \
     "${EXTRA_MOUNT_ARGS[@]}" \
     "${EXTRA_PORT_ARGS[@]}" \
+    "${SSH_AGENT_ARGS[@]}" \
     -e DISPLAY="$DISPLAY" \
     -e WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
     -e XDG_RUNTIME_DIR="$AUDIO_RUNTIME_DIR" \

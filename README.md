@@ -151,6 +151,18 @@ By default nothing running inside the container is reachable from the host. If y
 
 This is a regular Docker port publish (`-p`) — the killswitch only restricts *outbound* traffic (`OUTPUT` chain), so published ports work normally regardless of VPN/killswitch state.
 
+### Using your host's SSH agent
+
+On by default: `run.sh` forwards your host's `$SSH_AUTH_SOCK`, plus `~/.ssh/config` (read-only) and `~/.ssh/known_hosts` (read-write) if they exist. No other files under `~/.ssh` are touched. No-op with a warning if there's no `ssh-agent` running on the host.
+
+To turn it all off at once:
+
+```bash
+~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG --no-forward-ssh-agent bash
+```
+
+Note this is why `gnome-keyring-daemon` is started with `--components=secrets,pkcs11` (no `ssh`) in `entrypoint.sh`: gnome-keyring's own `ssh` component would otherwise claim `SSH_AUTH_SOCK` for its own (empty, keyless) agent and shadow the one forwarded from the host.
+
 ### Running other commands in the container
 
 Since `run.sh` accepts a trailing command, you can use the same VPN-protected environment for other things:
@@ -191,7 +203,15 @@ This was Docker's default 64MB `/dev/shm`, too small for Chromium's multi-proces
 The VPN's `tun0` MTU of 1500 can cause fragmentation on long-lived WebSocket connections. `entrypoint.sh` already lowers it to 1400 right after the interface comes up.
 
 **"Your sign-in won't be saved on this device" / `safeStorage not available` in logs.**
-This is fixed. `entrypoint.sh` launches the GUI app inside `dbus-run-session` with a `gnome-keyring-daemon` unlocked/started beforehand, so `org.freedesktop.secrets` is reachable and Electron's `safeStorage` can encrypt tokens normally. If you still see this warning, check `claude-desktop-unofficial --doctor` — the `Keyring` line should read `PASS ... org.freedesktop.secrets reachable`. If it doesn't, `docker exec -it claude-desktop-vpn ps aux | grep gnome-keyring` to confirm the daemon actually started.
+`entrypoint.sh` does launch the GUI inside `dbus-run-session` with a `gnome-keyring-daemon` unlocked/started beforehand — but in practice the `DBUS_SESSION_BUS_ADDRESS` env var doesn't reliably survive the several layers of the `claude-desktop-unofficial` launcher script between that setup and the actual Electron binary being exec'd, so the app can end up talking to a *different*, never-unlocked, D-Bus-auto-activated keyring instead of the one we unlocked.
+
+Rather than chase that down further, `entrypoint.sh` sidesteps it: on first run it writes `CLAUDE_PASSWORD_STORE=basic` to `~/.config/claude-desktop-debian/environment` (the launcher's own documented config file, read before every launch) if that file doesn't already exist. This makes the launcher pass `--password-store=basic` to Electron, which stores credentials in plain form instead of going through the OS keyring at all — sidestepping the D-Bus dependency entirely rather than fixing it. **Trade-off:** the login token is then stored unencrypted on disk (still only as exposed as the rest of `$HOME_DIR`, which is already bind-mounted from your host). Delete the `environment` file (or edit out that line) if you'd rather keep chasing the keyring path instead.
+
+To confirm which one is actually active, check the running process's own arguments rather than logs:
+```bash
+docker exec -it claude-desktop-vpn pgrep -af claude-desktop-unofficial
+```
+Look for `--password-store=basic` on the main `claude-desktop` process line (not the `bash /usr/bin/claude-desktop-unofficial` wrapper line).
 
 **Microphone doesn't work / `pactl` says "Connection refused".**
 Check what `run.sh` detected: it prints a warning if the runtime dir it picked (`/mnt/wslg/runtime-dir` on WSL2, `$XDG_RUNTIME_DIR` on native Linux) doesn't exist on the host. Confirm the actual Pulse socket is there (`ls <runtime-dir>/pulse/native`) and, on WSL2, that you're not using the nonexistent `/mnt/wslg/PulseServer` path from older guides.
