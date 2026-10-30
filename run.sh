@@ -8,9 +8,14 @@ CHECK_CLAUDE_UPDATE=0
 EXTRA_MOUNTS=()
 EXTRA_PORTS=()
 EXTRA_REDIRECTS=()
+DNS_SERVERS=()
 
-while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --no-forward-ssh-agent || "$1" == --check-claude-update || "$1" == --mount || "$1" == --port || "$1" == --redirect-port ]]; do
+while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "$1" == --disable-ipv6 || "$1" == --no-forward-ssh-agent || "$1" == --check-claude-update || "$1" == --mount || "$1" == --port || "$1" == --redirect-port || "$1" == --dns ]]; do
     case "$1" in
+        --dns)
+            DNS_SERVERS+=("$2")
+            shift 2
+            ;;
         --home)
             HOME_DIR="$2"
             shift 2
@@ -50,7 +55,7 @@ while [[ "$1" == --home || "$1" == --location || "$1" == --mount-wsl-drives || "
     esac
 done
 
-USAGE="Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--no-forward-ssh-agent] [--check-claude-update] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [--redirect-port local-port:remote-host:remote-port[/tcp|/udp] ...] [command]"
+USAGE="Usage: $0 --home /path/to/home --location <location_code> [--mount-wsl-drives] [--disable-ipv6] [--no-forward-ssh-agent] [--check-claude-update] [--mount src-path:dst-path ...] [--port [host-ip:]host-port:container-port ...] [--redirect-port local-port:remote-host:remote-port[/tcp|/udp] ...] [--dns ip ...] [command]"
 
 if [[ "$1" == --* ]]; then
     echo "Unknown option: $1" >&2
@@ -147,6 +152,19 @@ if [[ -n "$REDIRECT_PORTS" ]]; then
     )
 fi
 
+DNS_ARGS=()
+for d in "${DNS_SERVERS[@]}"; do
+    if [[ ! "$d" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ && ! "$d" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]*$ ]]; then
+        echo "!! --dns '$d' ignored: expected an IPv4 or IPv6 address" >&2
+        continue
+    fi
+    DNS_ARGS+=(--dns "$d")
+done
+# Never inherit the host's resolv.conf: fall back to fixed public resolvers.
+if [[ ${#DNS_ARGS[@]} -eq 0 ]]; then
+    DNS_ARGS=(--dns 8.8.8.8 --dns 1.1.1.1)
+fi
+
 SSH_AGENT_ARGS=()
 if [[ "$FORWARD_SSH_AGENT" -eq 1 ]]; then
     if [[ -n "${SSH_AUTH_SOCK:-}" && -S "$SSH_AUTH_SOCK" ]]; then
@@ -179,6 +197,7 @@ docker run -it --rm \
     --shm-size=1g \
     --mac-address="$CONTAINER_MAC" \
     --hostname="claude-desktop-vpn-container" \
+    "${DNS_ARGS[@]}" \
     "${IPV6_SYSCTLS[@]}" \
     "${REDIRECT_SYSCTLS[@]}" \
     -v "$HOME_DIR:/home/claude" \

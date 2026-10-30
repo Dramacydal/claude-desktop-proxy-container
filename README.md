@@ -177,6 +177,16 @@ Implemented as a DNAT rule in the `nat` table's `OUTPUT` chain (added by `entryp
 
 This is deliberate and scoped: only traffic landing on that specific destination (after the DNAT rewrite) is exempted — nothing else changes. Use it when you specifically want a particular endpoint to reach a local/low-latency service rather than round-tripping through the VPN, and are fine with that one destination seeing your real IP.
 
+### DNS servers
+
+The container's `/etc/resolv.conf` is never derived from the host's. By default `run.sh` passes `--dns 8.8.8.8 --dns 1.1.1.1` to Docker; use `--dns <ip>` (repeatable, IPv4 or IPv6) to replace that default:
+
+```bash
+~/claude-desktop-vpn-container/run.sh --home ~/claude-container-home/ --location SG --dns 9.9.9.9 --dns 149.112.112.112
+```
+
+DNS queries are subject to the killswitch like everything else, so they go through the VPN tunnel.
+
 ### Using your host's SSH agent
 
 On by default: `run.sh` forwards your host's `$SSH_AUTH_SOCK`, plus `~/.ssh/config` (read-only) and `~/.ssh/known_hosts` (read-write) if they exist. No other files under `~/.ssh` are touched. No-op with a warning if there's no `ssh-agent` running on the host.
