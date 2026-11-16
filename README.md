@@ -7,7 +7,7 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
 ## How it works
 
 - The container has its own isolated network namespace (unlike separate WSL2 distros, which share one).
-- `entrypoint.sh` sets a default-DROP `iptables` policy, brings up [sing-box](https://github.com/SagerNet/sing-box) in TUN mode (which routes all system traffic into a `tun0` interface and forwards it to your configured HTTP/HTTPS/SOCKS5 proxy), waits for `tun0`, then allows traffic only through it (plus loopback and the sing-box process itself, which needs to reach your actual proxy server).
+- `entrypoint.sh` sets a default-DROP `iptables` policy, brings up [sing-box](https://github.com/SagerNet/sing-box) in TUN mode (which routes all system traffic into a `tun0` interface and forwards it to your configured HTTP/HTTPS/SOCKS5 proxy), waits for `tun0` and checks that a real request through it succeeds (HTTP 200 + valid JSON from `ip-api.com`), then allows traffic only through it (plus loopback and the sing-box process itself, which needs to reach your actual proxy server).
 - If the proxy tunnel never comes up, the container refuses to start the GUI app instead of running with a broken killswitch.
 - GUI is displayed via X11 (`/tmp/.X11-unix`, bind-mounted from the host — the app runs in X11-via-XWayland mode, see `--doctor` output). Audio and microphone go through PulseAudio, whose socket `run.sh` locates automatically: `/mnt/wslg/runtime-dir/pulse/native` on WSL2 (provided by WSLg), or `$XDG_RUNTIME_DIR/pulse/native` on native Linux (provided by the desktop session).
 - Your home directory is stored outside the container (bind-mounted from the host), so it survives container restarts. The container itself is ephemeral — it only exists while the main process (Claude Desktop) is running.
@@ -45,6 +45,8 @@ Runs [Claude Desktop](https://github.com/aaddrick/claude-desktop-debian) inside 
 - An **HTTP, HTTPS, or SOCKS5 proxy** to route traffic through, with or without a username/password.
 
 Node.js is installed in the image alongside the packages above because `claude-desktop-unofficial` depends on it. The .NET 10 SDK is also installed, in case you want to build .NET projects inside the same proxied environment (e.g. via `--mount` — see [Mounting host folders](#mounting-your-windows-drives)) — change `dotnet-sdk-10.0` in the `Dockerfile` if you need a different version.
+
+Also included: `git`, `gh`, `jq`, `ripgrep`, `shellcheck`, and a general dev toolbox (see the `Dockerfile` package list for the full set), plus `chromium` (`--no-sandbox` is baked in via `/etc/chromium.d/`, and it's set as the default browser — see Troubleshooting for how OAuth/login link handling is wired up) and `gedit` for quick file edits inside the container.
 
 ## Project files
 
@@ -113,8 +115,9 @@ Here `proxy1` is active. Comment it out and uncomment `proxy2` to switch — no 
 With no trailing command, this launches `claude-desktop-unofficial` (the GUI) directly. The container:
 1. Sets up the killswitch.
 2. Generates a [sing-box](https://github.com/SagerNet/sing-box) config from the proxy file and brings up its TUN interface, waiting (up to 30s) for `tun0`.
-3. If the tunnel fails to come up, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-proxy tail -40 /var/log/sing-box.log`.
-4. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
+3. Verifies traffic actually flows through the tunnel: up to 5 attempts (5s apart) of `curl http://ip-api.com/json`, which must return HTTP 200 with valid JSON. On success it logs the exit IP and location.
+4. If either the tunnel or that check fails, the container **exits** rather than launching the GUI in a broken state — check `docker exec -it claude-desktop-proxy tail -40 /var/log/sing-box.log`.
+5. Launches Claude Desktop with GUI/audio/mic forwarded to your Windows session.
 
 Pass `--check-claude-update` (with the same `--home`/`--proxy-path`) to only check for an updated `claude-desktop-unofficial` package and exit — see [Setup](#setup) above. This replaces the old automatic version check that used to run (and print a warning) on every normal startup.
 
@@ -157,6 +160,36 @@ By default nothing running inside the container is reachable from the host. If y
 ```
 
 This is a regular Docker port publish (`-p`) — the killswitch only restricts *outbound* traffic (`OUTPUT` chain), so published ports work normally regardless of the tunnel/killswitch state.
+
+### Redirecting outbound connections
+
+The opposite of `--port`: instead of exposing something *in* the container to the outside, `--redirect-port local-port:remote-host:remote-port[/tcp|udp]` transparently reroutes an outbound connection *from inside* the container. Whatever a process inside the container tries to reach on `local-port` (including `127.0.0.1:local-port`) actually lands on `remote-host:remote-port` instead. Repeatable, defaults to `/tcp`:
+
+```bash
+~/claude-desktop-proxy-container/run.sh --home ~/claude-container-home/ --proxy-path ~/claude-proxy.conf \
+    --redirect-port 47306:5.182.87.205:47306 \
+    bash
+```
+
+Implemented as a DNAT rule in the `nat` table's `OUTPUT` chain (added by `entrypoint.sh` from the `PORT_REDIRECTS` env var `run.sh` sets). Redirecting a `127.0.0.1`-addressed connection specifically needs `net.ipv4.conf.all.route_localnet=1`, which can only be set at container creation (not via `sysctl -w` at runtime — same AppArmor restriction as `--disable-ipv6`) — `run.sh` adds it automatically whenever `--redirect-port` is used.
+
+**This traffic bypasses the proxy.** Everything else in the container is still bound by the killswitch (must go through `tun0` or be root), but each `--redirect-port` entry is carved out of that in three places `entrypoint.sh` sets up, all scoped to that exact `remote-host:remote-port`:
+
+- A `filter`/`OUTPUT` `ACCEPT` rule, so the killswitch lets the (post-DNAT) traffic out at all.
+- A `nat`/`POSTROUTING` `MASQUERADE` rule — without it, a connection that was originally addressed to `127.0.0.1` keeps that as its source address even after DNAT, so the remote side can never reply.
+- A host route via the container's pre-tunnel default interface, plus an `ip rule` for that destination pointing at the `main` routing table with a lower `pref` than sing-box's own policy rules. sing-box's `auto_route` steers traffic through `tun0` using policy routing, and Linux's rule lookup stops at the first rule that matches, not the most specific route overall. Without the extra `ip rule`, the host route would be correct but never consulted, and traffic would silently keep going through `tun0`.
+
+This is deliberate and scoped: only traffic landing on that specific destination (after the DNAT rewrite) is exempted — nothing else changes. Use it when you specifically want a particular endpoint to reach a local/low-latency service rather than round-tripping through the proxy, and are fine with that one destination seeing your real IP.
+
+### DNS servers
+
+The container's `/etc/resolv.conf` is never derived from the host's. By default `run.sh` passes `--dns 8.8.8.8 --dns 1.1.1.1` to Docker; use `--dns <ip>` (repeatable, IPv4 or IPv6) to replace that default:
+
+```bash
+~/claude-desktop-proxy-container/run.sh --home ~/claude-container-home/ --proxy-path ~/claude-proxy.conf --dns 9.9.9.9 --dns 149.112.112.112
+```
+
+DNS queries are subject to the killswitch like everything else, so they go through the proxy tunnel.
 
 ### Using your host's SSH agent
 
@@ -209,6 +242,16 @@ This was Docker's default 64MB `/dev/shm`, too small for Chromium's multi-proces
 **MCP server keeps disconnecting / "Couldn't finish loading" / WebSocket closes with code 1006.**
 The tunnel's `tun0` MTU of 1500 can cause fragmentation on long-lived WebSocket connections. `entrypoint.sh` already lowers it to 1400 right after the interface comes up.
 
+**Container exits right after "Verifying traffic actually flows through the proxy".**
+`tun0` came up but five requests to `ip-api.com` in a row didn't return HTTP 200 with valid JSON — usually the proxy is down, overloaded or rejecting the credentials, or `ip-api.com` is rate-limiting that exit IP. Nothing leaks in the meantime (the killswitch is already active). Retry, switch to another proxy line in the proxy file, or check `docker exec -it claude-desktop-proxy tail -40 /var/log/sing-box.log`.
+
+**A GUI window (e.g. Chromium) is in the Windows taskbar and clickable, but never appears.**
+Not a container problem — WSLg's own RDP channel to the Windows-side `msrdc.exe` can break, so the window exists but its contents never reach Windows. Confirm with:
+```bash
+grep -c rdp_allocate_shared_memory /mnt/wslg/weston.log
+```
+A large and growing count (`Input/output error` in the log) means the channel is dead. Fix: close everything, run `wsl --shutdown` in PowerShell, then start the container again. A healthy log has little to none of these lines.
+
 **"Your sign-in won't be saved on this device" / `safeStorage not available` in logs.**
 `entrypoint.sh` does launch the GUI inside `dbus-run-session` with a `gnome-keyring-daemon` unlocked/started beforehand — but in practice the `DBUS_SESSION_BUS_ADDRESS` env var doesn't reliably survive the several layers of the `claude-desktop-unofficial` launcher script between that setup and the actual Electron binary being exec'd, so the app can end up talking to a *different*, never-unlocked, D-Bus-auto-activated keyring instead of the one we unlocked.
 
@@ -237,6 +280,13 @@ This means your proxy is given as a **hostname**, not a bare IP, in the proxy fi
 
 **DNS queries / "who am I" checks show your real location instead of the proxy's.**
 Docker manages `/etc/resolv.conf` itself, so sing-box can't rewrite it — but the killswitch only allows traffic from root (uid 0) or through `tun0`, and sing-box's `auto_route` installs a full default route via `tun0` plus its own DNS resolution routed through the proxy (see the `dns` section of the generated config), so DNS from the unprivileged `claude` user is forced through the tunnel regardless of the nameserver IP configured. Verify anytime with `docker exec -it claude-desktop-proxy curl ip-api.com` — it should report your proxy's location, not your real one.
+
+**Clicking an OAuth/login link (e.g. "Sign in with Google" from Claude Desktop) pops up "no application associated" / an empty "Open With..." chooser.**
+This is a two-part fix, both handled automatically:
+1. `claude-desktop-unofficial`'s own `.desktop` file declares `MimeType=x-scheme-handler/claude`, but nothing sets it as the *default* handler — `entrypoint.sh` runs `xdg-mime default claude-desktop-unofficial.desktop x-scheme-handler/claude` for the `claude` user on every start.
+2. Even with that set, a chooser dialog (e.g. from `chromium`, the container's default browser) lists candidate apps from a separate index — `mimeinfo.cache` — not from the default-handler file. Without `desktop-file-utils` installed and `update-desktop-database` run at build time, that index doesn't exist and Claude Desktop never shows up as an option at all, regardless of the default-handler setting. The `Dockerfile` installs `desktop-file-utils` and runs `update-desktop-database /usr/share/applications` right after installing `claude-desktop-unofficial`.
+
+If you swap in a different browser/package and this breaks again, re-run `update-desktop-database` after any change to `/usr/share/applications`.
 
 ## Known limitations
 

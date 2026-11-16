@@ -20,6 +20,10 @@ RUN apt-get update -o Acquire::ForceIPv4=true && apt-get install -y -o Acquire::
     less \
     vim \
     nano \
+    gedit \
+    chromium \
+    xdg-utils \
+    desktop-file-utils \
     xxd \
     binutils \
     file \
@@ -80,7 +84,17 @@ RUN echo "cachebust=$CACHEBUST" && \
     echo "deb [signed-by=/usr/share/keyrings/claude-desktop-unofficial.gpg arch=amd64,arm64] https://pkg.claude-desktop-debian.dev stable main" \
         > /etc/apt/sources.list.d/claude-desktop-unofficial.list && \
     apt-get update -o Acquire::ForceIPv4=true && apt-get install -y -o Acquire::ForceIPv4=true --no-install-recommends claude-desktop-unofficial && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    update-desktop-database /usr/share/applications
+
+# /usr/bin/chromium (Debian's launcher script) sources every file under
+# /etc/chromium.d/ and appends to CHROMIUM_FLAGS — the supported way to
+# inject flags regardless of how chromium gets invoked (.desktop file,
+# xdg-open, x-www-browser, direct CLI).
+RUN mkdir -p /etc/chromium.d && \
+    printf 'CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"\n' > /etc/chromium.d/no-sandbox && \
+    update-alternatives --set x-www-browser /usr/bin/chromium
+ENV BROWSER=/usr/bin/chromium
 
 RUN groupadd -g ${PGID} claude && \
     useradd -u ${PUID} -g ${PGID} -m -s /bin/bash claude && \
